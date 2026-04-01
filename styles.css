@@ -295,6 +295,17 @@ td button {
   font-size: 0.92rem;
 }
 
+.day-card header {
+  display: grid;
+  gap: 8px;
+}
+
+.day-reset {
+  width: fit-content;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+}
+
 .slot-list {
   list-style: none;
   margin: 0;
@@ -305,7 +316,7 @@ td button {
 
 .slot-item {
   display: grid;
-  gap: 3px;
+  gap: 8px;
   padding: 12px 10px;
   border-top: 1px solid var(--line);
 }
@@ -325,6 +336,14 @@ td button {
 .empty-state {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.slot-editor {
+  display: grid;
+  gap: 6px;
+  max-width: 360px;
+  font-size: 0.86rem;
+  color: var(--muted);
 }
 
 .empty {

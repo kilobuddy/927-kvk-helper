@@ -81,6 +81,7 @@ playerForm.addEventListener("submit", (event) => {
 
 loadSampleButton.addEventListener("click", () => {
   state.players = samplePlayers.map((player) => ({ ...player, id: crypto.randomUUID() }));
+  state.manualAssignments = {};
   persistState();
   renderPlayers();
   renderSchedule(buildSchedule(state.players, state.dayConfigs));
@@ -88,6 +89,7 @@ loadSampleButton.addEventListener("click", () => {
 
 clearAllButton.addEventListener("click", () => {
   state.players = [];
+  state.manualAssignments = {};
   persistState();
   renderPlayers();
   renderSchedule(buildSchedule(state.players, state.dayConfigs));
@@ -230,6 +232,7 @@ function renderPlayers() {
   playersBody.querySelectorAll("[data-remove-id]").forEach((button) => {
     button.addEventListener("click", () => {
       state.players = state.players.filter((player) => player.id !== button.dataset.removeId);
+      pruneManualAssignments();
       persistState();
       renderPlayers();
       renderSchedule(buildSchedule(state.players, state.dayConfigs));
@@ -250,7 +253,11 @@ function buildSchedule(players, dayConfigs) {
       };
     }
 
-    const slotAssignments = maximizeAssignments(players, dayConfig.speedupKey);
+    const slotAssignments = applyManualAssignments(
+      dayConfig,
+      players,
+      maximizeAssignments(players, dayConfig.speedupKey),
+    );
     const slots = Array.from({ length: SLOT_COUNT }, (_, slotIndex) => {
       const winner = slotAssignments[slotIndex] || null;
 
@@ -313,21 +320,29 @@ function renderSchedule(days) {
 
     const slotItems = day.slots
       .map((slot) => {
-        if (!slot.player) {
-          return `
-            <li class="slot-item empty">
-              <span class="slot-time">${slot.timeLabel}</span>
-              <span class="slot-player">Open slot</span>
-              <span class="slot-meta">No available player inside this UTC window.</span>
-            </li>
-          `;
-        }
+        const optionsMarkup = getSlotOptions(day, slot.slotIndex)
+          .map((player) => {
+            const selected = slot.player?.id === player.id ? "selected" : "";
+            return `<option value="${player.id}" ${selected}>${escapeHtml(player.name)} (${formatDays(player[day.speedupKey])})</option>`;
+          })
+          .join("");
 
         return `
-          <li class="slot-item">
+          <li class="slot-item ${slot.player ? "" : "empty"}">
             <span class="slot-time">${slot.timeLabel}</span>
-            <span class="slot-player">${escapeHtml(slot.player.name)}</span>
-            <span class="slot-meta">${slot.focusLabel}: ${formatDays(slot.focusValue)} days | Preferred ${formatWindowLabel(slot.player.preferredStart, slot.player.preferredEnd)}</span>
+            <span class="slot-player">${slot.player ? escapeHtml(slot.player.name) : "Open slot"}</span>
+            <span class="slot-meta">${
+              slot.player
+                ? `${slot.focusLabel}: ${formatDays(slot.focusValue)} days | Preferred ${formatWindowLabel(slot.player.preferredStart, slot.player.preferredEnd)}`
+                : "No assigned player for this slot."
+            }</span>
+            <label class="slot-editor">
+              <span>Edit slot</span>
+              <select data-day-id="${day.id}" data-slot-index="${slot.slotIndex}">
+                <option value="">Open slot</option>
+                ${optionsMarkup}
+              </select>
+            </label>
           </li>
         `;
       })
@@ -362,6 +377,7 @@ function renderSchedule(days) {
       <header>
         <h3>${day.label}</h3>
         <p>Priority: ${speedupTypes[day.speedupKey]} | Filled ${day.assignedCount}/48</p>
+        <button type="button" class="button-ghost day-reset" data-reset-day="${day.id}">Reset Manual Edits</button>
       </header>
       <ul class="slot-list">${slotItems}</ul>
       ${overflowMarkup}
@@ -369,6 +385,46 @@ function renderSchedule(days) {
 
     scheduleOutput.append(card);
   });
+
+  scheduleOutput.querySelectorAll("[data-slot-index]").forEach((select) => {
+    select.addEventListener("change", (event) => {
+      const dayId = event.target.dataset.dayId;
+      const slotIndex = Number.parseInt(event.target.dataset.slotIndex, 10);
+      const playerId = event.target.value || null;
+      setManualAssignment(dayId, slotIndex, playerId);
+      renderSchedule(buildSchedule(state.players, state.dayConfigs));
+    });
+  });
+
+  scheduleOutput.querySelectorAll("[data-reset-day]").forEach((button) => {
+    button.addEventListener("click", () => {
+      delete state.manualAssignments[button.dataset.resetDay];
+      persistState();
+      renderSchedule(buildSchedule(state.players, state.dayConfigs));
+    });
+  });
+}
+
+function getSlotOptions(day, slotIndex) {
+  const assignedElsewhere = new Set(
+    day.slots
+      .filter((slot) => slot.slotIndex !== slotIndex && slot.player)
+      .map((slot) => slot.player.id),
+  );
+
+  return [...state.players]
+    .filter((player) => isSlotInsideWindow(slotIndex, player.preferredStart, player.preferredEnd))
+    .filter((player) => !assignedElsewhere.has(player.id))
+    .sort((left, right) => comparePlayersForDay(left, right, day.speedupKey));
+}
+
+function setManualAssignment(dayId, slotIndex, playerId) {
+  if (!state.manualAssignments[dayId]) {
+    state.manualAssignments[dayId] = {};
+  }
+
+  state.manualAssignments[dayId][slotIndex] = playerId;
+  persistState();
 }
 
 function comparePlayersForDay(left, right, speedupKey) {
@@ -570,6 +626,41 @@ function maximizeAssignments(players, speedupKey) {
   return assignments;
 }
 
+function applyManualAssignments(dayConfig, players, baseAssignments) {
+  const playersById = new Map(players.map((player) => [player.id, player]));
+  const assignments = [...baseAssignments];
+  const dayOverrides = state.manualAssignments?.[dayConfig.id] || {};
+
+  Object.entries(dayOverrides).forEach(([slotIndexText, playerId]) => {
+    const slotIndex = Number.parseInt(slotIndexText, 10);
+
+    if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= SLOT_COUNT) {
+      return;
+    }
+
+    if (playerId === null) {
+      assignments[slotIndex] = null;
+      return;
+    }
+
+    const player = playersById.get(playerId);
+    if (!player || !isSlotInsideWindow(slotIndex, player.preferredStart, player.preferredEnd)) {
+      assignments[slotIndex] = null;
+      return;
+    }
+
+    for (let index = 0; index < assignments.length; index += 1) {
+      if (assignments[index]?.id === player.id) {
+        assignments[index] = null;
+      }
+    }
+
+    assignments[slotIndex] = player;
+  });
+
+  return assignments;
+}
+
 function loadState() {
   try {
     const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}");
@@ -578,11 +669,13 @@ function loadState() {
       dayConfigs: Array.isArray(saved.dayConfigs) && saved.dayConfigs.length === defaultDayConfigs.length
         ? saved.dayConfigs
         : structuredClone(defaultDayConfigs),
+      manualAssignments: isPlainObject(saved.manualAssignments) ? saved.manualAssignments : {},
     };
   } catch (error) {
     return {
       players: [],
       dayConfigs: structuredClone(defaultDayConfigs),
+      manualAssignments: {},
     };
   }
 }
@@ -598,4 +691,24 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function pruneManualAssignments() {
+  const validIds = new Set(state.players.map((player) => player.id));
+
+  Object.keys(state.manualAssignments).forEach((dayId) => {
+    Object.entries(state.manualAssignments[dayId]).forEach(([slotIndex, playerId]) => {
+      if (playerId !== null && !validIds.has(playerId)) {
+        delete state.manualAssignments[dayId][slotIndex];
+      }
+    });
+
+    if (!Object.keys(state.manualAssignments[dayId]).length) {
+      delete state.manualAssignments[dayId];
+    }
+  });
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
