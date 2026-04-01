@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>927 KvK Prep Helper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Kingshot KvK Prep Week</p>
+          <h1>Fill every castle slot with the best available account.</h1>
+          <p class="hero-copy">
+            Add players, pick which speedup type matters for each day, and let
+            the scheduler build all 48 half-hour UTC appointments.
+          </p>
+        </div>
+        <div class="hero-card">
+          <p>Output</p>
+          <strong>5-day assignment board</strong>
+          <span>48 slots per day, ranked by prep value and preferred UTC.</span>
+        </div>
+      </section>
+
+      <section class="panel panel-grid">
+        <div>
+          <div class="section-heading">
+            <p class="eyebrow">Roster</p>
+            <h2>Player submissions</h2>
+          </div>
+
+          <form id="player-form" class="player-form">
+            <label>
+              Player / alliance
+              <input id="name" name="name" type="text" maxlength="40" required />
+            </label>
+
+            <div class="metric-grid">
+              <label>
+                General days
+                <input
+                  id="generalSpeedups"
+                  name="generalSpeedups"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  required
+                />
+              </label>
+              <label>
+                Research days
+                <input
+                  id="researchSpeedups"
+                  name="researchSpeedups"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  required
+                />
+              </label>
+              <label>
+                Construction days
+                <input
+                  id="constructionSpeedups"
+                  name="constructionSpeedups"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  required
+                />
+              </label>
+              <label>
+                Troop training days
+                <input
+                  id="troopTrainingSpeedups"
+                  name="troopTrainingSpeedups"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  required
+                />
+              </label>
+            </div>
+
+            <div class="metric-grid">
+              <label>
+                Preferred start UTC (24-hour)
+                <select id="preferredStart" name="preferredStart" required></select>
+              </label>
+              <label>
+                Preferred end UTC (24-hour)
+                <select id="preferredEnd" name="preferredEnd" required></select>
+              </label>
+            </div>
+
+            <p class="field-note">
+              Times use 24-hour UTC in 1-hour intervals. Use `00:00` to `24:00` for full-day availability.
+            </p>
+
+            <div class="form-actions">
+              <button type="button" id="set-full-day" class="button-ghost">Set Full Day UTC</button>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit">Add Player</button>
+              <button type="button" id="load-sample" class="button-ghost">Load Sample Roster</button>
+              <button type="button" id="clear-all" class="button-ghost">Clear Roster</button>
+            </div>
+          </form>
+
+          <div class="bulk-panel">
+            <div class="section-heading compact">
+              <h3>Quick paste</h3>
+              <p>One player per line: name,general,research,construction,troops,start,end</p>
+            </div>
+            <textarea
+              id="bulk-input"
+              rows="6"
+              placeholder="[PNX]Mando,13,12,13,22,00:00,01:00"
+            ></textarea>
+            <button type="button" id="import-bulk" class="button-ghost">Import Lines</button>
+          </div>
+        </div>
+
+        <div class="panel inset">
+          <div class="section-heading compact">
+            <p class="eyebrow">Prep Days</p>
+            <h2>Priority rules</h2>
+          </div>
+          <div id="day-settings" class="day-settings"></div>
+          <button id="run-scheduler" type="button">Generate Schedule</button>
+          <p class="helper-text">
+            Each player can hold at most one slot per day. If nobody is available
+            for a slot, it stays open.
+          </p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <p class="eyebrow">Current Roster</p>
+          <h2>Ranked player list</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>General</th>
+                <th>Research</th>
+                <th>Construction</th>
+                <th>Troops</th>
+                <th>Preferred UTC</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="players-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <p class="eyebrow">Assignments</p>
+          <h2>Castle role schedule</h2>
+        </div>
+        <div id="schedule-summary" class="schedule-summary"></div>
+        <div id="schedule-output" class="schedule-grid"></div>
+      </section>
+    </main>
+
+    <template id="day-setting-template">
+      <label class="day-setting">
+        <span class="day-setting-title"></span>
+        <select></select>
+      </label>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
