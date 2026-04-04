@@ -1,0 +1,146 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum DayMode {
+  AUTO_APPROVE
+  CONSTRUCTION
+  RESEARCH
+  GENERAL
+  TROOP_TRAINING
+}
+
+model User {
+  id               String               @id @default(cuid())
+  username         String               @unique
+  displayName      String?
+  passwordHash     String?
+  isActive         Boolean              @default(true)
+  createdById      String?
+  createdBy        User?                @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers     User[]               @relation("UserCreatedBy")
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  memberships      Membership[]
+  prepWeeks        PrepWeek[]           @relation("PrepWeekCreatedBy")
+  submissions      PlayerSubmission[]   @relation("SubmissionCreatedBy")
+  slotOverrides    AssignmentSlot[]     @relation("AssignmentUpdatedBy")
+  sessions         Session[]
+}
+
+model Workspace {
+  id          String       @id @default(cuid())
+  slug        String       @unique
+  name        String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  memberships Membership[]
+  prepWeeks   PrepWeek[]
+}
+
+model Membership {
+  id          String         @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        MembershipRole
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model PrepWeek {
+  id            String             @id @default(cuid())
+  workspaceId    String
+  name          String
+  startsOn      DateTime?
+  createdById   String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy     User               @relation("PrepWeekCreatedBy", fields: [createdById], references: [id])
+  days          PrepDay[]
+  submissions   PlayerSubmission[]
+}
+
+model PrepDay {
+  id            String         @id @default(cuid())
+  prepWeekId     String
+  dayNumber      Int
+  label         String
+  mode          DayMode
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  prepWeek      PrepWeek       @relation(fields: [prepWeekId], references: [id], onDelete: Cascade)
+  slots         AssignmentSlot[]
+
+  @@unique([prepWeekId, dayNumber])
+}
+
+model PlayerSubmission {
+  id                     String     @id @default(cuid())
+  prepWeekId             String
+  playerName             String
+  allianceTag            String?
+  generalSpeedups        Decimal    @db.Decimal(8, 1)
+  researchSpeedups       Decimal    @db.Decimal(8, 1)
+  constructionSpeedups   Decimal    @db.Decimal(8, 1)
+  troopTrainingSpeedups  Decimal    @db.Decimal(8, 1)
+  preferredStartUtc      String
+  preferredEndUtc        String
+  notes                  String?
+  createdById            String
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  prepWeek               PrepWeek   @relation(fields: [prepWeekId], references: [id], onDelete: Cascade)
+  createdBy              User       @relation("SubmissionCreatedBy", fields: [createdById], references: [id])
+  slots                  AssignmentSlot[]
+}
+
+model AssignmentSlot {
+  id                  String             @id @default(cuid())
+  prepDayId           String
+  slotIndex           Int
+  startsAtUtc         String
+  endsAtUtc           String
+  submissionId        String?
+  isManualOverride    Boolean            @default(false)
+  updatedById         String?
+  updatedAt           DateTime           @updatedAt
+
+  prepDay             PrepDay            @relation(fields: [prepDayId], references: [id], onDelete: Cascade)
+  submission          PlayerSubmission?  @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  updatedBy           User?              @relation("AssignmentUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([prepDayId, slotIndex])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  token      String   @unique @default(cuid())
+  userId     String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
