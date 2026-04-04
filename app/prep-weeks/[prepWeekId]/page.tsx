@@ -190,7 +190,7 @@ export default async function PrepWeekPage({
                       className="builder-textarea"
                       name="bulkInput"
                       rows={8}
-                      placeholder={`Kilo,HEL,13,12,13,22,00:00,01:00\nTkilrey,SKY,68,8,15,22,00:00,01:00,High value account`}
+                      placeholder={`Kilo,HEL,13,12,13,22,00:00,01:00\nTkilrey,SKY,68,8,15,22,00:00,01:00`}
                     />
                   </label>
                   <div className="inline-actions">
