@@ -1,6 +1,13 @@
 import { loginAction } from "./actions";
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ error?: string }>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const error = resolvedSearchParams?.error;
+
   return (
     <main className="app-shell">
       <section className="page-header">
@@ -12,6 +19,16 @@ export default function LoginPage() {
       </section>
 
       <section className="card" style={{ maxWidth: 520 }}>
+        {error === "invalid" ? (
+          <div className="notice warning" style={{ marginBottom: 16 }}>
+            Invalid username or password.
+          </div>
+        ) : null}
+        {error === "missing" ? (
+          <div className="notice warning" style={{ marginBottom: 16 }}>
+            Username and password are required.
+          </div>
+        ) : null}
         <form action={loginAction} className="form-grid">
           <label>
             Username

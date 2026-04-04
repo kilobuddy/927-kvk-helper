@@ -4,7 +4,7 @@ import { AppFrame } from "@/components/app-frame";
 import { MembershipRole } from "@prisma/client";
 
 import { formatAuditTimestamp } from "@/lib/audit";
-import { createPrepWeekAction, openLatestPrepWeekAction } from "./actions";
+import { createPrepWeekAction, deletePrepWeekAction, openLatestPrepWeekAction } from "./actions";
 import { requireMembership } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -22,6 +22,7 @@ export default async function DashboardPage() {
     orderBy: [{ startsOn: "desc" }, { createdAt: "desc" }]
   });
   const canEdit = membership.role === MembershipRole.OWNER || membership.role === MembershipRole.EDITOR;
+  const isOwner = membership.role === MembershipRole.OWNER;
   const auditLogs = canEdit
     ? await prisma.auditLog.findMany({
         where: { workspaceId: membership.workspaceId },
@@ -39,8 +40,8 @@ export default async function DashboardPage() {
         <p className="eyebrow">Dashboard</p>
         <h1>Shared KvK workspace</h1>
         <p className="muted">
-          Prep weeks and player submissions now live in the database. Editors can create and manage them, while viewers
-          stay read-only.
+          Prep weeks and player submissions now live in the database. Owners manage prep weeks and users, editors can
+          manage roster and schedule data, and viewers stay read-only.
         </p>
       </section>
 
@@ -63,7 +64,7 @@ export default async function DashboardPage() {
                 </button>
               </form>
             ) : null}
-            {canEdit ? (
+            {isOwner ? (
               <Link href="/admin/users" className="button-secondary">
                 Manage Users
               </Link>
@@ -72,7 +73,7 @@ export default async function DashboardPage() {
         </div>
       </section>
 
-      {canEdit ? (
+      {isOwner ? (
         <section className="card">
           <h2>Create prep week</h2>
           <form action={createPrepWeekAction} className="form-grid two-col">
@@ -102,7 +103,7 @@ export default async function DashboardPage() {
                 <th>Name</th>
                 <th>Start</th>
                 <th>Submissions</th>
-                <th>Open</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -112,9 +113,19 @@ export default async function DashboardPage() {
                   <td>{prepWeek.startsOn ? prepWeek.startsOn.toISOString().slice(0, 10) : "Not set"}</td>
                   <td>{prepWeek._count.submissions}</td>
                   <td>
-                    <Link href={`/prep-weeks/${prepWeek.id}`} className="button-secondary">
-                      Open
-                    </Link>
+                    <div className="inline-actions">
+                      <Link href={`/prep-weeks/${prepWeek.id}`} className="button-secondary">
+                        Open
+                      </Link>
+                      {isOwner ? (
+                        <form action={deletePrepWeekAction}>
+                          <input type="hidden" name="prepWeekId" value={prepWeek.id} />
+                          <button className="button-danger" type="submit">
+                            Delete
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}

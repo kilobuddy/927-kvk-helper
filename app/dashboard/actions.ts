@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createAuditLog } from "@/lib/audit";
-import { ensureCanEdit, requireMembership } from "@/lib/auth";
+import { ensureOwner, requireMembership } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const defaultDays = [
@@ -17,7 +17,16 @@ const defaultDays = [
 ];
 
 export async function createPrepWeekAction(formData: FormData) {
-  const { user, membership } = await ensureCanEdit();
+  const user = await ensureOwner();
+  const membership = await prisma.membership.findFirst({
+    where: {
+      userId: user.id
+    }
+  });
+
+  if (!membership) {
+    throw new Error("Owner workspace membership not found.");
+  }
 
   const name = String(formData.get("name") || "").trim();
   const startsOnValue = String(formData.get("startsOn") || "").trim();
@@ -53,6 +62,54 @@ export async function createPrepWeekAction(formData: FormData) {
 
   revalidatePath("/dashboard");
   redirect(`/prep-weeks/${prepWeek.id}`);
+}
+
+export async function deletePrepWeekAction(formData: FormData) {
+  const user = await ensureOwner();
+  const membership = await prisma.membership.findFirst({
+    where: {
+      userId: user.id
+    }
+  });
+
+  if (!membership) {
+    throw new Error("Owner workspace membership not found.");
+  }
+
+  const prepWeekId = String(formData.get("prepWeekId") || "");
+
+  const prepWeek = await prisma.prepWeek.findFirst({
+    where: {
+      id: prepWeekId,
+      workspaceId: membership.workspaceId
+    }
+  });
+
+  if (!prepWeek) {
+    throw new Error("Prep week not found.");
+  }
+
+  await prisma.prepWeek.delete({
+    where: {
+      id: prepWeek.id
+    }
+  });
+
+  await createAuditLog(prisma, {
+    workspaceId: membership.workspaceId,
+    actorUserId: user.id,
+    action: "DELETE_PREP_WEEK",
+    entityType: "PrepWeek",
+    entityId: prepWeek.id,
+    summary: `Deleted prep week ${prepWeek.name}.`,
+    details: {
+      name: prepWeek.name,
+      startsOn: prepWeek.startsOn?.toISOString() || null
+    }
+  });
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard");
 }
 
 export async function openLatestPrepWeekAction() {

@@ -11,7 +11,7 @@ export async function loginAction(formData: FormData) {
   const password = String(formData.get("password") || "");
 
   if (!username || !password) {
-    throw new Error("Username and password are required.");
+    redirect("/login?error=missing");
   }
 
   const user = await prisma.user.findUnique({
@@ -20,13 +20,13 @@ export async function loginAction(formData: FormData) {
   });
 
   if (!user || !user.passwordHash || !user.isActive) {
-    throw new Error("Invalid username or password.");
+    redirect("/login?error=invalid");
   }
 
   const isValid = await verifyPassword(password, user.passwordHash);
 
   if (!isValid) {
-    throw new Error("Invalid username or password.");
+    redirect("/login?error=invalid");
   }
 
   await createSessionForUser(user.id);
