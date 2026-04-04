@@ -38,6 +38,7 @@ model User {
   submissions      PlayerSubmission[]   @relation("SubmissionCreatedBy")
   slotOverrides    AssignmentSlot[]     @relation("AssignmentUpdatedBy")
   sessions         Session[]
+  auditLogs        AuditLog[]           @relation("AuditActor")
 }
 
 model Workspace {
@@ -49,6 +50,7 @@ model Workspace {
 
   memberships Membership[]
   prepWeeks   PrepWeek[]
+  auditLogs   AuditLog[]
 }
 
 model Membership {
@@ -143,4 +145,21 @@ model Session {
   updatedAt  DateTime @updatedAt
 
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  workspaceId String
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String?
+  summary     String
+  details     Json?
+  createdAt   DateTime  @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorUser   User?     @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
 }

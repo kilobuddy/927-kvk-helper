@@ -4,6 +4,7 @@ import { AssignmentSlot } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { createAuditLog } from "@/lib/audit";
 import { ensureCanEdit, requireMembership } from "@/lib/auth";
 import { allianceTagOptions } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -113,6 +114,19 @@ export async function generateScheduleAction(prepWeekId: string) {
         data: rows
       });
     }
+
+    await createAuditLog(tx, {
+      workspaceId: membership.workspaceId,
+      actorUserId: user.id,
+      action: "GENERATE_SCHEDULE",
+      entityType: "PrepWeek",
+      entityId: prepWeek.id,
+      summary: `Generated schedules for ${prepWeek.name}.`,
+      details: {
+        scheduledDays: prepWeek.days.filter((day) => computeDaySchedule(day, prepWeek.submissions).autoApprove === false).length,
+        submissionCount: prepWeek.submissions.length
+      }
+    });
   });
 
   revalidatePath(`/prep-weeks/${prepWeekId}`);
@@ -197,6 +211,21 @@ export async function updateSlotAssignmentAction(prepWeekId: string, formData: F
         updatedById: user.id
       }
     });
+
+    await createAuditLog(tx, {
+      workspaceId: membership.workspaceId,
+      actorUserId: user.id,
+      action: "MANUAL_OVERRIDE_SLOT",
+      entityType: "PrepDay",
+      entityId: prepDayId,
+      summary: `Updated slot ${slotIndex} on ${prepDay.label}.`,
+      details: {
+        prepWeekId,
+        prepDayId,
+        slotIndex,
+        submissionId
+      }
+    });
   });
 
   revalidatePath(`/prep-weeks/${prepWeekId}`);
@@ -232,7 +261,7 @@ export async function createSubmissionAction(prepWeekId: string, formData: FormD
     throw new Error(parsed.error.issues[0]?.message || "Invalid submission.");
   }
 
-  await prisma.playerSubmission.create({
+  const createdSubmission = await prisma.playerSubmission.create({
     data: {
       prepWeekId,
       playerName: parsed.data.playerName,
@@ -245,6 +274,19 @@ export async function createSubmissionAction(prepWeekId: string, formData: FormD
       preferredEndUtc: parsed.data.preferredEndUtc,
       notes: parsed.data.notes || null,
       createdById: user.id
+    }
+  });
+
+  await createAuditLog(prisma, {
+    workspaceId: membership.workspaceId,
+    actorUserId: user.id,
+    action: "CREATE_SUBMISSION",
+    entityType: "PlayerSubmission",
+    entityId: createdSubmission.id,
+    summary: `Added player submission for ${parsed.data.playerName}.`,
+    details: {
+      playerName: parsed.data.playerName,
+      allianceTag: parsed.data.allianceTag || null
     }
   });
 
@@ -319,6 +361,19 @@ export async function bulkCreateSubmissionsAction(prepWeekId: string, formData: 
     }))
   });
 
+  await createAuditLog(prisma, {
+    workspaceId: membership.workspaceId,
+    actorUserId: user.id,
+    action: "BULK_CREATE_SUBMISSIONS",
+    entityType: "PrepWeek",
+    entityId: prepWeekId,
+    summary: `Imported ${parsedRows.length} player submissions.`,
+    details: {
+      count: parsedRows.length,
+      playerNames: parsedRows.map((row) => row.playerName)
+    }
+  });
+
   revalidatePath(`/prep-weeks/${prepWeekId}`);
 }
 
@@ -352,6 +407,16 @@ export async function updateSubmissionAction(prepWeekId: string, submissionId: s
     throw new Error(parsed.error.issues[0]?.message || "Invalid submission.");
   }
 
+  const existingSubmission = await prisma.playerSubmission.findFirst({
+    where: {
+      id: submissionId,
+      prepWeekId,
+      prepWeek: {
+        workspaceId: membership.workspaceId
+      }
+    }
+  });
+
   await prisma.playerSubmission.updateMany({
     where: {
       id: submissionId,
@@ -374,11 +439,34 @@ export async function updateSubmissionAction(prepWeekId: string, submissionId: s
     }
   });
 
+  await createAuditLog(prisma, {
+    workspaceId: membership.workspaceId,
+    actorUserId: user.id,
+    action: "UPDATE_SUBMISSION",
+    entityType: "PlayerSubmission",
+    entityId: submissionId,
+    summary: `Updated player submission for ${parsed.data.playerName}.`,
+    details: {
+      previousPlayerName: existingSubmission?.playerName || null,
+      playerName: parsed.data.playerName
+    }
+  });
+
   revalidatePath(`/prep-weeks/${prepWeekId}`);
 }
 
 export async function deleteSubmissionAction(prepWeekId: string, submissionId: string) {
-  const { membership } = await ensureCanEdit();
+  const { user, membership } = await ensureCanEdit();
+
+  const existingSubmission = await prisma.playerSubmission.findFirst({
+    where: {
+      id: submissionId,
+      prepWeekId,
+      prepWeek: {
+        workspaceId: membership.workspaceId
+      }
+    }
+  });
 
   await prisma.playerSubmission.deleteMany({
     where: {
@@ -390,11 +478,23 @@ export async function deleteSubmissionAction(prepWeekId: string, submissionId: s
     }
   });
 
+  await createAuditLog(prisma, {
+    workspaceId: membership.workspaceId,
+    actorUserId: user.id,
+    action: "DELETE_SUBMISSION",
+    entityType: "PlayerSubmission",
+    entityId: submissionId,
+    summary: `Deleted player submission for ${existingSubmission?.playerName || "unknown player"}.`,
+    details: {
+      playerName: existingSubmission?.playerName || null
+    }
+  });
+
   revalidatePath(`/prep-weeks/${prepWeekId}`);
 }
 
 export async function updateDayModeAction(prepWeekId: string, formData: FormData) {
-  const { membership } = await ensureCanEdit();
+  const { user, membership } = await ensureCanEdit();
 
   const prepDayId = String(formData.get("prepDayId") || "");
   const mode = String(formData.get("mode") || "");
@@ -404,6 +504,16 @@ export async function updateDayModeAction(prepWeekId: string, formData: FormData
   if (!validModes.includes(mode as (typeof validModes)[number])) {
     throw new Error("Invalid day mode.");
   }
+
+  const existingDay = await prisma.prepDay.findFirst({
+    where: {
+      id: prepDayId,
+      prepWeekId,
+      prepWeek: {
+        workspaceId: membership.workspaceId
+      }
+    }
+  });
 
   await prisma.prepDay.updateMany({
     where: {
@@ -415,6 +525,19 @@ export async function updateDayModeAction(prepWeekId: string, formData: FormData
     },
     data: {
       mode: mode as (typeof validModes)[number]
+    }
+  });
+
+  await createAuditLog(prisma, {
+    workspaceId: membership.workspaceId,
+    actorUserId: user.id,
+    action: "UPDATE_DAY_MODE",
+    entityType: "PrepDay",
+    entityId: prepDayId,
+    summary: `Changed ${existingDay?.label || "prep day"} to ${mode}.`,
+    details: {
+      previousMode: existingDay?.mode || null,
+      mode
     }
   });
 
