@@ -6,6 +6,7 @@ const ownerUsername = process.env.E2E_USERNAME || process.env.OWNER_USERNAME;
 const ownerPassword = process.env.E2E_PASSWORD || process.env.OWNER_PASSWORD;
 const prepWeekPrefix = "E2E Regression";
 const usernamePrefix = "e2e-regression-";
+const createdPrepWeekIds: string[] = [];
 
 async function login(page: import("@playwright/test").Page) {
   if (!ownerUsername || !ownerPassword) {
@@ -70,6 +71,16 @@ test.describe.serial("full regression flows", () => {
   });
 
   test.afterAll(async () => {
+    if (createdPrepWeekIds.length) {
+      await prisma.prepWeek.deleteMany({
+        where: {
+          id: {
+            in: createdPrepWeekIds
+          }
+        }
+      });
+    }
+
     await prisma.$disconnect();
   });
 
@@ -119,6 +130,7 @@ test.describe.serial("full regression flows", () => {
 
       if (prepWeek?.id) {
         createdPrepWeekId = prepWeek.id;
+        createdPrepWeekIds.push(prepWeek.id);
         break;
       }
 

@@ -181,7 +181,7 @@ export default async function PrepWeekPage({
                   <br />
                   <code>name,alliance,general,research,construction,troops,start,end,optional notes</code>
                   <br />
-                  <code>[PNX]Mando,13,12,13,22,00:00,01:00,optional notes</code>
+                  <code>[HEL]Kilo,13,12,13,22,00:00,01:00,optional notes</code>
                 </p>
                 <form action={bulkCreateSubmissionsAction.bind(null, prepWeek.id)} className="form-grid">
                   <label>
@@ -190,7 +190,7 @@ export default async function PrepWeekPage({
                       className="builder-textarea"
                       name="bulkInput"
                       rows={8}
-                      placeholder="Mando,PNX,13,12,13,22,00:00,01:00&#10;Tkilrey,SKY,68,8,15,22,00:00,01:00,High value account"
+                      placeholder={`Kilo,HEL,13,12,13,22,00:00,01:00\nTkilrey,SKY,68,8,15,22,00:00,01:00,High value account`}
                     />
                   </label>
                   <div className="inline-actions">
