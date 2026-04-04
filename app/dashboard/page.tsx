@@ -21,15 +21,17 @@ export default async function DashboardPage() {
     },
     orderBy: [{ startsOn: "desc" }, { createdAt: "desc" }]
   });
-  const auditLogs = await prisma.auditLog.findMany({
-    where: { workspaceId: membership.workspaceId },
-    include: {
-      actorUser: true
-    },
-    orderBy: { createdAt: "desc" },
-    take: 20
-  });
   const canEdit = membership.role === MembershipRole.OWNER || membership.role === MembershipRole.EDITOR;
+  const auditLogs = canEdit
+    ? await prisma.auditLog.findMany({
+        where: { workspaceId: membership.workspaceId },
+        include: {
+          actorUser: true
+        },
+        orderBy: { createdAt: "desc" },
+        take: 20
+      })
+    : [];
 
   return (
     <AppFrame user={user} membership={membership}>
@@ -128,20 +130,22 @@ export default async function DashboardPage() {
         </div>
       </section>
 
-      <section className="card">
-        <h2>Recent activity</h2>
-        <div className="stack">
-          {auditLogs.map((log) => (
-            <div className="notice" key={log.id}>
-              <strong>{log.summary}</strong>
-              <div className="muted">
-                {log.actorUser?.username || "System"} | {log.action} | {formatAuditTimestamp(log.createdAt)}
+      {canEdit ? (
+        <section className="card">
+          <h2>Recent activity</h2>
+          <div className="stack">
+            {auditLogs.map((log) => (
+              <div className="notice" key={log.id}>
+                <strong>{log.summary}</strong>
+                <div className="muted">
+                  {log.actorUser?.username || "System"} | {log.action} | {formatAuditTimestamp(log.createdAt)}
+                </div>
               </div>
-            </div>
-          ))}
-          {!auditLogs.length ? <p className="muted">No audit activity yet.</p> : null}
-        </div>
-      </section>
+            ))}
+            {!auditLogs.length ? <p className="muted">No audit activity yet.</p> : null}
+          </div>
+        </section>
+      ) : null}
     </AppFrame>
   );
 }
