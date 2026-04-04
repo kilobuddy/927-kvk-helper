@@ -4,6 +4,7 @@ import { DayMode } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { createAuditLog } from "@/lib/audit";
 import { ensureCanEdit, requireMembership } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -34,6 +35,19 @@ export async function createPrepWeekAction(formData: FormData) {
       days: {
         create: defaultDays
       }
+    }
+  });
+
+  await createAuditLog(prisma, {
+    workspaceId: membership.workspaceId,
+    actorUserId: user.id,
+    action: "CREATE_PREP_WEEK",
+    entityType: "PrepWeek",
+    entityId: prepWeek.id,
+    summary: `Created prep week ${name}.`,
+    details: {
+      name,
+      startsOn: startsOnValue || null
     }
   });
 
