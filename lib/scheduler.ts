@@ -72,7 +72,12 @@ export function isSubmissionEligibleForSlot(slotIndex: number, submission: Sched
   const slotStart = slotIndex * SLOT_MINUTES;
   const startMinutes = parseTime(submission.preferredStartUtc);
   const endMinutes = parseTime(submission.preferredEndUtc);
-  return slotStart >= startMinutes && slotStart < endMinutes;
+
+  if (startMinutes < endMinutes) {
+    return slotStart >= startMinutes && slotStart < endMinutes;
+  }
+
+  return slotStart >= startMinutes || slotStart < endMinutes;
 }
 
 function totalSpeedups(submission: SchedulableSubmission) {
@@ -85,7 +90,14 @@ function totalSpeedups(submission: SchedulableSubmission) {
 }
 
 function windowLength(submission: SchedulableSubmission) {
-  return parseTime(submission.preferredEndUtc) - parseTime(submission.preferredStartUtc);
+  const startMinutes = parseTime(submission.preferredStartUtc);
+  const endMinutes = parseTime(submission.preferredEndUtc);
+
+  if (startMinutes < endMinutes) {
+    return endMinutes - startMinutes;
+  }
+
+  return 24 * 60 - startMinutes + endMinutes;
 }
 
 function compareSubmissions(left: SchedulableSubmission, right: SchedulableSubmission, speedupKey: SpeedupKey) {
@@ -205,6 +217,10 @@ export function getDayModeLabel(mode: DayMode) {
 export function formatWindowLabel(start: string, end: string) {
   if (start === "00:00" && end === "24:00") {
     return "Full day UTC";
+  }
+
+  if (parseTime(start) >= parseTime(end)) {
+    return `${start} - ${end} (overnight UTC)`;
   }
 
   return `${start} - ${end}`;

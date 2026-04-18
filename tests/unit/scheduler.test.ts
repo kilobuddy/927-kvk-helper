@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DayMode, type AssignmentSlot, type PlayerSubmission, type PrepDay } from "@prisma/client";
 
-import { buildEligibleOptionsForSlot, computeDaySchedule, mergeManualAssignments } from "../../lib/scheduler";
+import { buildEligibleOptionsForSlot, computeDaySchedule, isSubmissionEligibleForSlot, mergeManualAssignments } from "../../lib/scheduler";
 
 function createSubmission(overrides: Partial<PlayerSubmission> & Pick<PlayerSubmission, "id" | "playerName">): PlayerSubmission {
   return {
@@ -144,4 +144,19 @@ test("mergeManualAssignments recalculates the displayed day value for manual swa
   assert.equal(merged[1]?.submission?.id, "one");
   assert.equal(merged[1]?.focusValue, 4000);
   assert.equal(merged[1]?.manual, true);
+});
+
+test("isSubmissionEligibleForSlot supports overnight UTC windows", () => {
+  const overnight = createSubmission({
+    id: "overnight",
+    playerName: "Overnight",
+    preferredStartUtc: "23:00",
+    preferredEndUtc: "01:00"
+  });
+
+  assert.equal(isSubmissionEligibleForSlot(46, overnight), true);
+  assert.equal(isSubmissionEligibleForSlot(47, overnight), true);
+  assert.equal(isSubmissionEligibleForSlot(0, overnight), true);
+  assert.equal(isSubmissionEligibleForSlot(1, overnight), true);
+  assert.equal(isSubmissionEligibleForSlot(2, overnight), false);
 });

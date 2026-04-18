@@ -2,6 +2,24 @@ import { MembershipRole } from "@prisma/client";
 import { z } from "zod";
 import { allianceTagOptions } from "@/lib/constants";
 
+function parseUtcTime(value: string) {
+  if (!/^\d{2}:\d{2}$/.test(value)) {
+    return null;
+  }
+
+  if (value === "24:00") {
+    return 24 * 60;
+  }
+
+  const [hours, minutes] = value.split(":").map(Number);
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+}
+
 export const createUserSchema = z.object({
   username: z
     .string()
@@ -44,10 +62,43 @@ export const playerSubmissionSchema = z.object({
   preferredStartUtc: z.string().regex(/^\d{2}:\d{2}$/),
   preferredEndUtc: z.string().regex(/^\d{2}:\d{2}$/),
   notes: z.string().trim().max(500).optional()
-}).refine(
-  (value) => value.preferredStartUtc < value.preferredEndUtc,
-  {
-    message: "Preferred end must be after preferred start.",
-    path: ["preferredEndUtc"]
+}).superRefine((value, ctx) => {
+  const startMinutes = parseUtcTime(value.preferredStartUtc);
+  const endMinutes = parseUtcTime(value.preferredEndUtc);
+
+  if (startMinutes === null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Preferred start must be a valid UTC time.",
+      path: ["preferredStartUtc"]
+    });
   }
-);
+
+  if (endMinutes === null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Preferred end must be a valid UTC time.",
+      path: ["preferredEndUtc"]
+    });
+  }
+
+  if (startMinutes === null || endMinutes === null) {
+    return;
+  }
+
+  if (value.preferredStartUtc === "24:00") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Preferred start cannot be 24:00.",
+      path: ["preferredStartUtc"]
+    });
+  }
+
+  if (startMinutes === endMinutes) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Preferred start and end cannot be the same time.",
+      path: ["preferredEndUtc"]
+    });
+  }
+});

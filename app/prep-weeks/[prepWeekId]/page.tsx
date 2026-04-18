@@ -158,7 +158,7 @@ export default async function PrepWeekPage({
                     </select>
                   </label>
                   <p className="muted helper-copy" style={{ gridColumn: "1 / -1" }}>
-                    Times use 24-hour UTC in 1-hour intervals. Use `00:00` to `24:00` for full-day availability.
+                    Times use 24-hour UTC in 1-hour intervals. Overnight windows like `23:00` to `01:00` are allowed. Use `00:00` to `24:00` for full-day availability.
                   </p>
                   <label style={{ gridColumn: "1 / -1" }}>
                     Notes
