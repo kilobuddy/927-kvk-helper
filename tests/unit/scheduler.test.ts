@@ -160,3 +160,23 @@ test("isSubmissionEligibleForSlot supports overnight UTC windows", () => {
   assert.equal(isSubmissionEligibleForSlot(1, overnight), true);
   assert.equal(isSubmissionEligibleForSlot(2, overnight), false);
 });
+
+test("buildEligibleOptionsForSlot still returns choices for auto-approve days", () => {
+  const early = createSubmission({
+    id: "early",
+    playerName: "Early",
+    preferredStartUtc: "00:00",
+    preferredEndUtc: "02:00"
+  });
+  const late = createSubmission({
+    id: "late",
+    playerName: "Late",
+    preferredStartUtc: "03:00",
+    preferredEndUtc: "05:00"
+  });
+
+  const options = buildEligibleOptionsForSlot([late, early], [], 0, DayMode.AUTO_APPROVE);
+
+  assert.equal(options[0]?.id, "early");
+  assert.equal(options[1]?.id, "late");
+});

@@ -1,6 +1,6 @@
 import { AssignmentSlot, DayMode, PlayerSubmission, PrepDay } from "@prisma/client";
 
-const SLOT_COUNT = 48;
+export const SLOT_COUNT = 48;
 const SLOT_MINUTES = 30;
 
 type SchedulablePrepDay = PrepDay;
@@ -239,7 +239,16 @@ export function buildEligibleOptionsForSlot(
   const speedupKey = modeToSpeedupKey(mode);
 
   if (!speedupKey) {
-    return [];
+    return submissions.sort((left, right) => {
+      const leftEligible = isSubmissionEligibleForSlot(slotIndex, left);
+      const rightEligible = isSubmissionEligibleForSlot(slotIndex, right);
+
+      return (
+        Number(rightEligible) - Number(leftEligible) ||
+        left.preferredStartUtc.localeCompare(right.preferredStartUtc) ||
+        left.playerName.localeCompare(right.playerName)
+      );
+    });
   }
 
   return submissions

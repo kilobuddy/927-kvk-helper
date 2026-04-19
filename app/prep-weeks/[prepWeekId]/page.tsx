@@ -80,6 +80,8 @@ export default async function PrepWeekPage({
     notFound();
   }
 
+  const allowSharedSchedule = prepWeek.submissions.length < 48;
+
   return (
     <AppFrame user={user} membership={membership}>
       <section className="page-header">
@@ -197,6 +199,9 @@ export default async function PrepWeekPage({
                     <button className="button-secondary" type="submit">
                       Import Lines
                     </button>
+                    <Link href={`/prep-weeks/${prepWeek.id}/submissions.csv`} className="button-secondary">
+                      Export CSV
+                    </Link>
                   </div>
                 </form>
               </section>
@@ -233,6 +238,16 @@ export default async function PrepWeekPage({
                 ))}
               </div>
               <form action={generateScheduleAction.bind(null, prepWeek.id)} style={{ marginTop: 18 }}>
+                <label className="muted" style={{ display: "block", marginBottom: 12 }}>
+                  <input
+                    type="checkbox"
+                    name="useSameScheduleAllDays"
+                    value="true"
+                    disabled={!allowSharedSchedule}
+                    style={{ marginRight: 8 }}
+                  />
+                  Use the same slot assignments on all 3 days when fewer than 48 players applied.
+                </label>
                 <button className="button" type="submit">
                   Generate Schedule
                 </button>
@@ -240,6 +255,11 @@ export default async function PrepWeekPage({
               <p className="muted helper-copy" style={{ marginTop: 16 }}>
                 Each player can hold at most one slot per day. If nobody is available for a slot, it stays open.
               </p>
+              {!allowSharedSchedule ? (
+                <p className="muted helper-copy" style={{ marginTop: 8 }}>
+                  This shared-schedule option becomes available when the roster has fewer than 48 submissions.
+                </p>
+              ) : null}
             </aside>
           </div>
         </section>
@@ -262,7 +282,12 @@ export default async function PrepWeekPage({
             <h2 style={{ marginBottom: 4 }}>Player submissions</h2>
             <p className="muted">{prepWeek.submissions.length} saved player{submissionsPlural(prepWeek.submissions.length)}</p>
           </div>
-          <span className="button-secondary">View</span>
+          <div className="inline-actions">
+            <Link href={`/prep-weeks/${prepWeek.id}/submissions.csv`} className="button-secondary">
+              Export CSV
+            </Link>
+            <span className="button-secondary">View</span>
+          </div>
         </summary>
 
         <div className="table-wrap" style={{ marginTop: 16 }}>
@@ -431,6 +456,16 @@ export default async function PrepWeekPage({
           </div>
           {canEdit ? (
             <form action={generateScheduleAction.bind(null, prepWeek.id)}>
+              <label className="muted" style={{ display: "block", marginBottom: 10 }}>
+                <input
+                  type="checkbox"
+                  name="useSameScheduleAllDays"
+                  value="true"
+                  disabled={!allowSharedSchedule}
+                  style={{ marginRight: 8 }}
+                />
+                Use the same slot assignments on all 3 days.
+              </label>
               <button className="button" type="submit">
                 Generate Schedule
               </button>
@@ -442,8 +477,17 @@ export default async function PrepWeekPage({
           {prepWeek.days.map((day) => {
             const computed = computeDaySchedule(day, prepWeek.submissions);
             const speedupKey = getModeSpeedupKey(day.mode);
+            const hasStoredSchedule = day.slots.length > 0;
             const renderedSlots = computed.autoApprove
-              ? []
+              ? day.slots.map((slot) => ({
+                  slotIndex: slot.slotIndex,
+                  startsAtUtc: slot.startsAtUtc,
+                  endsAtUtc: slot.endsAtUtc,
+                  label: `${slot.startsAtUtc} - ${slot.endsAtUtc}`,
+                  submission: slot.submission,
+                  focusValue: slot.submission && speedupKey ? Number(slot.submission[speedupKey]) : null,
+                  manual: slot.isManualOverride
+                }))
               : mergeManualAssignments(
                   computed.slots.map((slot) => ({
                     ...slot,
@@ -461,7 +505,11 @@ export default async function PrepWeekPage({
                 .filter((slot) => slot.submission)
                 .map((slot) => [slot.submission!.id, slot.label] as const)
             );
-            const overflow = computed.autoApprove ? [] : buildOverflowForDay(day.mode, prepWeek.submissions, assignedIds);
+            const overflow = computed.autoApprove
+              ? prepWeek.submissions
+                  .filter((submission) => !assignedIds.has(submission.id))
+                  .sort((left, right) => left.playerName.localeCompare(right.playerName))
+              : buildOverflowForDay(day.mode, prepWeek.submissions, assignedIds);
 
             return (
               <section className="card schedule-card" key={day.id}>
@@ -475,7 +523,7 @@ export default async function PrepWeekPage({
                   ) : null}
                 </div>
 
-                {computed.autoApprove ? (
+                {computed.autoApprove && !hasStoredSchedule ? (
                   <div className="notice warning">
                     Whoever applies in game will get it. No castle slot schedule is generated for this day.
                   </div>

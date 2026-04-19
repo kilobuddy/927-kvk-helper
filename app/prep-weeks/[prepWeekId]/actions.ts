@@ -8,7 +8,7 @@ import { createAuditLog } from "@/lib/audit";
 import { ensureCanEdit, requireMembership } from "@/lib/auth";
 import { allianceTagOptions } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
-import { computeDaySchedule } from "@/lib/scheduler";
+import { computeDaySchedule, SLOT_COUNT } from "@/lib/scheduler";
 import { playerSubmissionSchema } from "@/lib/validation";
 
 function normalizePlayerAndAlliance(rawPlayerName: string, explicitAllianceTag: string) {
@@ -56,8 +56,9 @@ async function ensurePrepWeekAccess(prepWeekId: string) {
   return { user, membership, prepWeek };
 }
 
-export async function generateScheduleAction(prepWeekId: string) {
+export async function generateScheduleAction(prepWeekId: string, formData: FormData) {
   const { user, membership } = await ensureCanEdit();
+  const useSameScheduleAllDays = String(formData.get("useSameScheduleAllDays") || "") === "true";
 
   const prepWeek = await prisma.prepWeek.findFirst({
     where: {
@@ -76,6 +77,14 @@ export async function generateScheduleAction(prepWeekId: string) {
     throw new Error("Prep week not found.");
   }
 
+  const shouldShareAllDays = useSameScheduleAllDays && prepWeek.submissions.length < SLOT_COUNT;
+  const templateDay =
+    shouldShareAllDays
+      ? prepWeek.days.find((day) => computeDaySchedule(day, prepWeek.submissions).autoApprove === false) || prepWeek.days[0]
+      : null;
+  const sharedSchedule = templateDay ? computeDaySchedule(templateDay, prepWeek.submissions) : null;
+  const usingSharedAllDays = shouldShareAllDays && sharedSchedule?.autoApprove === false;
+
   const dayIds = prepWeek.days.map((day) => day.id);
 
   await prisma.$transaction(async (tx) => {
@@ -90,7 +99,9 @@ export async function generateScheduleAction(prepWeekId: string) {
     const rows: Omit<AssignmentSlot, "id" | "updatedAt">[] = [];
 
     prepWeek.days.forEach((day) => {
-      const computed = computeDaySchedule(day, prepWeek.submissions);
+      const computed = usingSharedAllDays
+        ? sharedSchedule
+        : computeDaySchedule(day, prepWeek.submissions);
 
       if (computed.autoApprove) {
         return;
@@ -123,8 +134,11 @@ export async function generateScheduleAction(prepWeekId: string) {
       entityId: prepWeek.id,
       summary: `Generated schedules for ${prepWeek.name}.`,
       details: {
-        scheduledDays: prepWeek.days.filter((day) => computeDaySchedule(day, prepWeek.submissions).autoApprove === false).length,
-        submissionCount: prepWeek.submissions.length
+        scheduledDays: usingSharedAllDays
+          ? prepWeek.days.length
+          : prepWeek.days.filter((day) => computeDaySchedule(day, prepWeek.submissions).autoApprove === false).length,
+        submissionCount: prepWeek.submissions.length,
+        sharedAcrossDays: usingSharedAllDays
       }
     });
   });
