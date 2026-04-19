@@ -1,0 +1,2 @@
+ALTER TABLE "PrepWeek"
+ADD COLUMN "isEditLocked" BOOLEAN NOT NULL DEFAULT false;

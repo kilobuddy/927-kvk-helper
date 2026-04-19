@@ -1,6 +1,6 @@
 "use server";
 
-import { AssignmentSlot } from "@prisma/client";
+import { AssignmentSlot, MembershipRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -10,6 +10,31 @@ import { allianceTagOptions } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { computeDaySchedule, SLOT_COUNT } from "@/lib/scheduler";
 import { playerSubmissionSchema } from "@/lib/validation";
+
+function canManagePrepWeekLock(user: { username: string }, membership: { role: MembershipRole }) {
+  void user;
+  return membership.role === MembershipRole.OWNER;
+}
+
+async function ensurePrepWeekCanEdit(prepWeekId: string) {
+  const { user, membership } = await ensureCanEdit();
+  const prepWeek = await prisma.prepWeek.findFirst({
+    where: {
+      id: prepWeekId,
+      workspaceId: membership.workspaceId
+    }
+  });
+
+  if (!prepWeek) {
+    throw new Error("Prep week not found.");
+  }
+
+  if (prepWeek.isEditLocked && !canManagePrepWeekLock(user, membership)) {
+    throw new Error("This prep week is locked for editing by an owner.");
+  }
+
+  return { user, membership, prepWeek };
+}
 
 function normalizePlayerAndAlliance(rawPlayerName: string, explicitAllianceTag: string) {
   const playerName = rawPlayerName.trim();
@@ -57,13 +82,12 @@ async function ensurePrepWeekAccess(prepWeekId: string) {
 }
 
 export async function generateScheduleAction(prepWeekId: string, formData: FormData) {
-  const { user, membership } = await ensureCanEdit();
+  const { user, membership, prepWeek } = await ensurePrepWeekCanEdit(prepWeekId);
   const useSameScheduleAllDays = String(formData.get("useSameScheduleAllDays") || "") === "true";
   const exportScheduleCsv = String(formData.get("exportScheduleCsv") || "") === "true";
-
-  const prepWeek = await prisma.prepWeek.findFirst({
+  const prepWeekWithData = await prisma.prepWeek.findFirst({
     where: {
-      id: prepWeekId,
+      id: prepWeek.id,
       workspaceId: membership.workspaceId
     },
     include: {
@@ -74,21 +98,21 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
     }
   });
 
-  if (!prepWeek) {
+  if (!prepWeekWithData) {
     throw new Error("Prep week not found.");
   }
 
-  const shouldShareAllDays = useSameScheduleAllDays && prepWeek.submissions.length < SLOT_COUNT;
+  const shouldShareAllDays = useSameScheduleAllDays && prepWeekWithData.submissions.length < SLOT_COUNT;
   const templateDay =
     shouldShareAllDays
-      ? prepWeek.days.find((day) => computeDaySchedule(day, prepWeek.submissions).autoApprove === false) || prepWeek.days[0]
+      ? prepWeekWithData.days.find((day) => computeDaySchedule(day, prepWeekWithData.submissions).autoApprove === false) || prepWeekWithData.days[0]
       : null;
-  const sharedSchedule = templateDay ? computeDaySchedule(templateDay, prepWeek.submissions) : null;
+  const sharedSchedule = templateDay ? computeDaySchedule(templateDay, prepWeekWithData.submissions) : null;
   const usingSharedAllDays = shouldShareAllDays && sharedSchedule?.autoApprove === false;
-  const daySchedules = new Map(prepWeek.days.map((day) => [day.id, computeDaySchedule(day, prepWeek.submissions)]));
-  const scheduledDayCount = prepWeek.days.filter((day) => (daySchedules.get(day.id) || computeDaySchedule(day, prepWeek.submissions)).autoApprove === false).length;
+  const daySchedules = new Map(prepWeekWithData.days.map((day) => [day.id, computeDaySchedule(day, prepWeekWithData.submissions)]));
+  const scheduledDayCount = prepWeekWithData.days.filter((day) => (daySchedules.get(day.id) || computeDaySchedule(day, prepWeekWithData.submissions)).autoApprove === false).length;
 
-  const dayIds = prepWeek.days.map((day) => day.id);
+  const dayIds = prepWeekWithData.days.map((day) => day.id);
 
   await prisma.$transaction(async (tx) => {
     await tx.assignmentSlot.deleteMany({
@@ -101,8 +125,8 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
 
     const rows: Omit<AssignmentSlot, "id" | "updatedAt">[] = [];
 
-    prepWeek.days.forEach((day) => {
-      const baseSchedule = daySchedules.get(day.id) || computeDaySchedule(day, prepWeek.submissions);
+    prepWeekWithData.days.forEach((day) => {
+      const baseSchedule = daySchedules.get(day.id) || computeDaySchedule(day, prepWeekWithData.submissions);
       const computed = usingSharedAllDays && baseSchedule.autoApprove === false ? sharedSchedule : baseSchedule;
 
       if (computed.autoApprove) {
@@ -133,11 +157,11 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
       actorUserId: user.id,
       action: "GENERATE_SCHEDULE",
       entityType: "PrepWeek",
-      entityId: prepWeek.id,
-      summary: `Generated schedules for ${prepWeek.name}.`,
+      entityId: prepWeekWithData.id,
+      summary: `Generated schedules for ${prepWeekWithData.name}.`,
       details: {
         scheduledDays: scheduledDayCount,
-        submissionCount: prepWeek.submissions.length,
+        submissionCount: prepWeekWithData.submissions.length,
         sharedAcrossDays: usingSharedAllDays
       }
     });
@@ -151,7 +175,7 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
 }
 
 export async function updateSlotAssignmentAction(prepWeekId: string, formData: FormData) {
-  const { user, membership } = await ensureCanEdit();
+  const { user, membership } = await ensurePrepWeekCanEdit(prepWeekId);
 
   const prepDayId = String(formData.get("prepDayId") || "");
   const slotIndex = Number.parseInt(String(formData.get("slotIndex") || ""), 10);
@@ -251,17 +275,7 @@ export async function updateSlotAssignmentAction(prepWeekId: string, formData: F
 }
 
 export async function createSubmissionAction(prepWeekId: string, formData: FormData) {
-  const { user, membership } = await ensureCanEdit();
-  const prepWeek = await prisma.prepWeek.findFirst({
-    where: {
-      id: prepWeekId,
-      workspaceId: membership.workspaceId
-    }
-  });
-
-  if (!prepWeek) {
-    throw new Error("Prep week not found.");
-  }
+  const { user, membership } = await ensurePrepWeekCanEdit(prepWeekId);
 
   const parsed = playerSubmissionSchema.safeParse({
     playerName: formData.get("playerName"),
@@ -312,18 +326,7 @@ export async function createSubmissionAction(prepWeekId: string, formData: FormD
 }
 
 export async function bulkCreateSubmissionsAction(prepWeekId: string, formData: FormData) {
-  const { user, membership } = await ensureCanEdit();
-
-  const prepWeek = await prisma.prepWeek.findFirst({
-    where: {
-      id: prepWeekId,
-      workspaceId: membership.workspaceId
-    }
-  });
-
-  if (!prepWeek) {
-    throw new Error("Prep week not found.");
-  }
+  const { user, membership } = await ensurePrepWeekCanEdit(prepWeekId);
 
   const rawInput = String(formData.get("bulkInput") || "");
   const lines = rawInput
@@ -396,18 +399,7 @@ export async function bulkCreateSubmissionsAction(prepWeekId: string, formData: 
 }
 
 export async function updateSubmissionAction(prepWeekId: string, submissionId: string, formData: FormData) {
-  const { user, membership } = await ensureCanEdit();
-
-  const prepWeek = await prisma.prepWeek.findFirst({
-    where: {
-      id: prepWeekId,
-      workspaceId: membership.workspaceId
-    }
-  });
-
-  if (!prepWeek) {
-    throw new Error("Prep week not found.");
-  }
+  const { user, membership } = await ensurePrepWeekCanEdit(prepWeekId);
 
   const parsed = playerSubmissionSchema.safeParse({
     playerName: formData.get("playerName"),
@@ -474,7 +466,7 @@ export async function updateSubmissionAction(prepWeekId: string, submissionId: s
 }
 
 export async function deleteSubmissionAction(prepWeekId: string, submissionId: string) {
-  const { user, membership } = await ensureCanEdit();
+  const { user, membership } = await ensurePrepWeekCanEdit(prepWeekId);
 
   const existingSubmission = await prisma.playerSubmission.findFirst({
     where: {
@@ -512,7 +504,7 @@ export async function deleteSubmissionAction(prepWeekId: string, submissionId: s
 }
 
 export async function updateDayModeAction(prepWeekId: string, formData: FormData) {
-  const { user, membership } = await ensureCanEdit();
+  const { user, membership } = await ensurePrepWeekCanEdit(prepWeekId);
 
   const prepDayId = String(formData.get("prepDayId") || "");
   const mode = String(formData.get("mode") || "");
@@ -556,6 +548,40 @@ export async function updateDayModeAction(prepWeekId: string, formData: FormData
     details: {
       previousMode: existingDay?.mode || null,
       mode
+    }
+  });
+
+  revalidatePath(`/prep-weeks/${prepWeekId}`);
+  redirect(`/prep-weeks/${prepWeekId}`);
+}
+
+export async function togglePrepWeekEditLockAction(prepWeekId: string, formData: FormData) {
+  const { user, membership, prepWeek } = await ensurePrepWeekAccess(prepWeekId);
+
+  if (!canManagePrepWeekLock(user, membership)) {
+    throw new Error("Only owners can change the edit lock for this prep week.");
+  }
+
+  const isEditLocked = String(formData.get("isEditLocked") || "") === "true";
+
+  await prisma.prepWeek.update({
+    where: {
+      id: prepWeek.id
+    },
+    data: {
+      isEditLocked
+    }
+  });
+
+  await createAuditLog(prisma, {
+    workspaceId: membership.workspaceId,
+    actorUserId: user.id,
+    action: "TOGGLE_PREP_WEEK_EDIT_LOCK",
+    entityType: "PrepWeek",
+    entityId: prepWeek.id,
+    summary: `${isEditLocked ? "Locked" : "Unlocked"} prep week editing for ${prepWeek.name}.`,
+    details: {
+      isEditLocked
     }
   });
 

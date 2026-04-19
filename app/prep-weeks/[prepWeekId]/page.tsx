@@ -10,6 +10,7 @@ import {
   createSubmissionAction,
   deleteSubmissionAction,
   generateScheduleAction,
+  togglePrepWeekEditLockAction,
   updateDayModeAction,
   updateSlotAssignmentAction,
   updateSubmissionAction
@@ -80,6 +81,9 @@ export default async function PrepWeekPage({
     notFound();
   }
 
+  const canManageEditLock = membership.role === MembershipRole.OWNER;
+  const isEditLockedForCurrentUser = prepWeek.isEditLocked && !canManageEditLock;
+  const canEditPrepWeek = canEdit && !isEditLockedForCurrentUser;
   const allowSharedSchedule = prepWeek.submissions.length < 48;
 
   return (
@@ -95,10 +99,24 @@ export default async function PrepWeekPage({
             Back to Dashboard
           </Link>
           {prepWeek.startsOn ? <span className="pill">Starts: {prepWeek.startsOn.toISOString().slice(0, 10)}</span> : null}
+          {prepWeek.isEditLocked ? <span className="pill">Editing locked</span> : null}
         </div>
+        {canManageEditLock ? (
+          <form action={togglePrepWeekEditLockAction.bind(null, prepWeek.id)} className="inline-actions" style={{ marginTop: 12 }}>
+            <input type="hidden" name="isEditLocked" value={String(!prepWeek.isEditLocked)} />
+            <button className="button-secondary" type="submit">
+              {prepWeek.isEditLocked ? "Unlock Editing" : "Lock Editing"}
+            </button>
+          </form>
+        ) : null}
+        {isEditLockedForCurrentUser ? (
+          <p className="muted" style={{ marginTop: 12 }}>
+            An owner has locked this prep week for editing. You can still review the roster and schedule, but editing is disabled.
+          </p>
+        ) : null}
       </section>
 
-      {canEdit ? (
+      {canEditPrepWeek ? (
         <section className="builder-shell">
           <div className="builder-layout">
             <div className="builder-main">
@@ -284,12 +302,12 @@ export default async function PrepWeekPage({
                 <th>UTC Window</th>
                 <th>Notes</th>
                 <th>Saved By</th>
-                {canEdit ? <th>Actions</th> : null}
+                {canEditPrepWeek ? <th>Actions</th> : null}
               </tr>
             </thead>
             <tbody>
               {prepWeek.submissions.map((submission) => (
-                canEdit ? (
+                canEditPrepWeek ? (
                   <tr key={submission.id}>
                     <td>
                       <strong>
@@ -418,7 +436,7 @@ export default async function PrepWeekPage({
               ))}
               {!prepWeek.submissions.length ? (
                 <tr>
-                  <td colSpan={canEdit ? 8 : 7} className="muted">
+                  <td colSpan={canEditPrepWeek ? 8 : 7} className="muted">
                     No submissions saved yet.
                   </td>
                 </tr>
@@ -436,7 +454,7 @@ export default async function PrepWeekPage({
               Generate and store a schedule from the current roster. Viewers can read schedules but cannot edit them.
             </p>
           </div>
-          {canEdit ? (
+          {canEditPrepWeek ? (
             <form action={generateScheduleAction.bind(null, prepWeek.id)}>
               <label className="muted" style={{ display: "block", marginBottom: 10 }}>
                 <input
@@ -528,7 +546,7 @@ export default async function PrepWeekPage({
                             <th>Slot</th>
                             <th>Assigned</th>
                             <th>Details</th>
-                            {canEdit ? <th>Edit</th> : null}
+                            {canEditPrepWeek ? <th>Edit</th> : null}
                           </tr>
                         </thead>
                         <tbody>
@@ -562,7 +580,7 @@ export default async function PrepWeekPage({
                                     <span className="muted">No assignment yet.</span>
                                   )}
                                 </td>
-                                {canEdit ? (
+                                {canEditPrepWeek ? (
                                   <td>
                                     <details>
                                       <summary className="button-secondary" style={{ display: "inline-block", cursor: "pointer" }}>
