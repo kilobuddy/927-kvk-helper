@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireMembership } from "@/lib/auth";
 import { formatDays, formatWindowLabel, getDayModeLabel, getModeSpeedupKey } from "@/lib/scheduler";
+import { hasPrepWeekEditLockColumn, prepWeekScalarSelect, withPrepWeekEditLock } from "@/lib/prep-week-lock";
 import { prisma } from "@/lib/prisma";
 
 function escapeCsvValue(value: string | null | undefined) {
@@ -30,13 +31,15 @@ export async function GET(
 ) {
   const { prepWeekId } = await params;
   const { membership } = await requireMembership();
+  const includeEditLock = await hasPrepWeekEditLockColumn();
 
   const prepWeek = await prisma.prepWeek.findFirst({
     where: {
       id: prepWeekId,
       workspaceId: membership.workspaceId
     },
-    include: {
+    select: {
+      ...prepWeekScalarSelect(includeEditLock),
       days: {
         include: {
           slots: {
@@ -50,8 +53,9 @@ export async function GET(
       }
     }
   });
+  const prepWeekWithLock = withPrepWeekEditLock(prepWeek);
 
-  if (!prepWeek) {
+  if (!prepWeekWithLock) {
     return new NextResponse("Prep week not found.", { status: 404 });
   }
 
@@ -71,7 +75,7 @@ export async function GET(
     "isManualOverride"
   ];
 
-  const rows = prepWeek.days.flatMap((day) => {
+  const rows = prepWeekWithLock.days.flatMap((day) => {
     const speedupKey = getModeSpeedupKey(day.mode);
     const focusType = speedupKey ? getDayModeLabel(day.mode) : "";
 
@@ -100,7 +104,7 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${createCsvFilename(prepWeek.name)}"`,
+      "Content-Disposition": `attachment; filename="${createCsvFilename(prepWeekWithLock.name)}"`,
       "Cache-Control": "no-store"
     }
   });

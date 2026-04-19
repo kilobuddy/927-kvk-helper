@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 
 import { createAuditLog } from "@/lib/audit";
 import { ensureOwner, requireMembership } from "@/lib/auth";
+import { hasPrepWeekEditLockColumn, prepWeekScalarSelect } from "@/lib/prep-week-lock";
 import { prisma } from "@/lib/prisma";
 
 const defaultDays = [
@@ -77,12 +78,14 @@ export async function deletePrepWeekAction(formData: FormData) {
   }
 
   const prepWeekId = String(formData.get("prepWeekId") || "");
+  const includeEditLock = await hasPrepWeekEditLockColumn();
 
   const prepWeek = await prisma.prepWeek.findFirst({
     where: {
       id: prepWeekId,
       workspaceId: membership.workspaceId
-    }
+    },
+    select: prepWeekScalarSelect(includeEditLock)
   });
 
   if (!prepWeek) {
@@ -114,9 +117,11 @@ export async function deletePrepWeekAction(formData: FormData) {
 
 export async function openLatestPrepWeekAction() {
   const { membership } = await requireMembership();
+  const includeEditLock = await hasPrepWeekEditLockColumn();
 
   const prepWeek = await prisma.prepWeek.findFirst({
     where: { workspaceId: membership.workspaceId },
+    select: prepWeekScalarSelect(includeEditLock),
     orderBy: [{ startsOn: "desc" }, { createdAt: "desc" }]
   });
 

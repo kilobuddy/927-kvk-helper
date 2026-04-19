@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireMembership } from "@/lib/auth";
+import { hasPrepWeekEditLockColumn, prepWeekScalarSelect, withPrepWeekEditLock } from "@/lib/prep-week-lock";
 import { prisma } from "@/lib/prisma";
 
 function escapeCsvValue(value: string | null | undefined) {
@@ -29,13 +30,15 @@ export async function GET(
 ) {
   const { prepWeekId } = await params;
   const { membership } = await requireMembership();
+  const includeEditLock = await hasPrepWeekEditLockColumn();
 
   const prepWeek = await prisma.prepWeek.findFirst({
     where: {
       id: prepWeekId,
       workspaceId: membership.workspaceId
     },
-    include: {
+    select: {
+      ...prepWeekScalarSelect(includeEditLock),
       submissions: {
         include: {
           createdBy: true
@@ -44,8 +47,9 @@ export async function GET(
       }
     }
   });
+  const prepWeekWithLock = withPrepWeekEditLock(prepWeek);
 
-  if (!prepWeek) {
+  if (!prepWeekWithLock) {
     return new NextResponse("Prep week not found.", { status: 404 });
   }
 
@@ -62,7 +66,7 @@ export async function GET(
     "savedBy"
   ];
 
-  const rows = prepWeek.submissions.map((submission) => [
+  const rows = prepWeekWithLock.submissions.map((submission) => [
     submission.playerName,
     submission.allianceTag || "",
     String(submission.generalSpeedups),
@@ -83,7 +87,7 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${createCsvFilename(prepWeek.name)}"`,
+      "Content-Disposition": `attachment; filename="${createCsvFilename(prepWeekWithLock.name)}"`,
       "Cache-Control": "no-store"
     }
   });

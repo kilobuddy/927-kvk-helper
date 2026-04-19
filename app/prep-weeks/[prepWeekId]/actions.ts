@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { createAuditLog } from "@/lib/audit";
 import { ensureCanEdit, requireMembership } from "@/lib/auth";
 import { allianceTagOptions } from "@/lib/constants";
+import { hasPrepWeekEditLockColumn, prepWeekScalarSelect, withPrepWeekEditLock } from "@/lib/prep-week-lock";
 import { prisma } from "@/lib/prisma";
 import { computeDaySchedule, SLOT_COUNT } from "@/lib/scheduler";
 import { playerSubmissionSchema } from "@/lib/validation";
@@ -18,22 +19,25 @@ function canManagePrepWeekLock(user: { username: string }, membership: { role: M
 
 async function ensurePrepWeekCanEdit(prepWeekId: string) {
   const { user, membership } = await ensureCanEdit();
+  const includeEditLock = await hasPrepWeekEditLockColumn();
   const prepWeek = await prisma.prepWeek.findFirst({
     where: {
       id: prepWeekId,
       workspaceId: membership.workspaceId
-    }
+    },
+    select: prepWeekScalarSelect(includeEditLock)
   });
+  const prepWeekWithLock = withPrepWeekEditLock(prepWeek);
 
-  if (!prepWeek) {
+  if (!prepWeekWithLock) {
     throw new Error("Prep week not found.");
   }
 
-  if (prepWeek.isEditLocked && !canManagePrepWeekLock(user, membership)) {
+  if (prepWeekWithLock.isEditLocked && !canManagePrepWeekLock(user, membership)) {
     throw new Error("This prep week is locked for editing by an owner.");
   }
 
-  return { user, membership, prepWeek };
+  return { user, membership, prepWeek: prepWeekWithLock };
 }
 
 function normalizePlayerAndAlliance(rawPlayerName: string, explicitAllianceTag: string) {
@@ -67,52 +71,58 @@ function normalizePlayerAndAlliance(rawPlayerName: string, explicitAllianceTag: 
 
 async function ensurePrepWeekAccess(prepWeekId: string) {
   const { user, membership } = await requireMembership();
+  const includeEditLock = await hasPrepWeekEditLockColumn();
   const prepWeek = await prisma.prepWeek.findFirst({
     where: {
       id: prepWeekId,
       workspaceId: membership.workspaceId
-    }
+    },
+    select: prepWeekScalarSelect(includeEditLock)
   });
+  const prepWeekWithLock = withPrepWeekEditLock(prepWeek);
 
-  if (!prepWeek) {
+  if (!prepWeekWithLock) {
     throw new Error("Prep week not found.");
   }
 
-  return { user, membership, prepWeek };
+  return { user, membership, prepWeek: prepWeekWithLock };
 }
 
 export async function generateScheduleAction(prepWeekId: string, formData: FormData) {
   const { user, membership, prepWeek } = await ensurePrepWeekCanEdit(prepWeekId);
   const useSameScheduleAllDays = String(formData.get("useSameScheduleAllDays") || "") === "true";
   const exportScheduleCsv = String(formData.get("exportScheduleCsv") || "") === "true";
+  const includeEditLock = await hasPrepWeekEditLockColumn();
   const prepWeekWithData = await prisma.prepWeek.findFirst({
     where: {
       id: prepWeek.id,
       workspaceId: membership.workspaceId
     },
-    include: {
+    select: {
+      ...prepWeekScalarSelect(includeEditLock),
       days: {
         orderBy: { dayNumber: "asc" }
       },
       submissions: true
     }
   });
+  const prepWeekWithDataAndLock = withPrepWeekEditLock(prepWeekWithData);
 
-  if (!prepWeekWithData) {
+  if (!prepWeekWithDataAndLock) {
     throw new Error("Prep week not found.");
   }
 
-  const shouldShareAllDays = useSameScheduleAllDays && prepWeekWithData.submissions.length < SLOT_COUNT;
+  const shouldShareAllDays = useSameScheduleAllDays && prepWeekWithDataAndLock.submissions.length < SLOT_COUNT;
   const templateDay =
     shouldShareAllDays
-      ? prepWeekWithData.days.find((day) => computeDaySchedule(day, prepWeekWithData.submissions).autoApprove === false) || prepWeekWithData.days[0]
+      ? prepWeekWithDataAndLock.days.find((day) => computeDaySchedule(day, prepWeekWithDataAndLock.submissions).autoApprove === false) || prepWeekWithDataAndLock.days[0]
       : null;
-  const sharedSchedule = templateDay ? computeDaySchedule(templateDay, prepWeekWithData.submissions) : null;
+  const sharedSchedule = templateDay ? computeDaySchedule(templateDay, prepWeekWithDataAndLock.submissions) : null;
   const usingSharedAllDays = shouldShareAllDays && sharedSchedule?.autoApprove === false;
-  const daySchedules = new Map(prepWeekWithData.days.map((day) => [day.id, computeDaySchedule(day, prepWeekWithData.submissions)]));
-  const scheduledDayCount = prepWeekWithData.days.filter((day) => (daySchedules.get(day.id) || computeDaySchedule(day, prepWeekWithData.submissions)).autoApprove === false).length;
+  const daySchedules = new Map(prepWeekWithDataAndLock.days.map((day) => [day.id, computeDaySchedule(day, prepWeekWithDataAndLock.submissions)]));
+  const scheduledDayCount = prepWeekWithDataAndLock.days.filter((day) => (daySchedules.get(day.id) || computeDaySchedule(day, prepWeekWithDataAndLock.submissions)).autoApprove === false).length;
 
-  const dayIds = prepWeekWithData.days.map((day) => day.id);
+  const dayIds = prepWeekWithDataAndLock.days.map((day) => day.id);
 
   await prisma.$transaction(async (tx) => {
     await tx.assignmentSlot.deleteMany({
@@ -125,8 +135,8 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
 
     const rows: Omit<AssignmentSlot, "id" | "updatedAt">[] = [];
 
-    prepWeekWithData.days.forEach((day) => {
-      const baseSchedule = daySchedules.get(day.id) || computeDaySchedule(day, prepWeekWithData.submissions);
+    prepWeekWithDataAndLock.days.forEach((day) => {
+      const baseSchedule = daySchedules.get(day.id) || computeDaySchedule(day, prepWeekWithDataAndLock.submissions);
       const computed = usingSharedAllDays && baseSchedule.autoApprove === false ? sharedSchedule : baseSchedule;
 
       if (computed.autoApprove) {
@@ -157,11 +167,11 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
       actorUserId: user.id,
       action: "GENERATE_SCHEDULE",
       entityType: "PrepWeek",
-      entityId: prepWeekWithData.id,
-      summary: `Generated schedules for ${prepWeekWithData.name}.`,
+      entityId: prepWeekWithDataAndLock.id,
+      summary: `Generated schedules for ${prepWeekWithDataAndLock.name}.`,
       details: {
         scheduledDays: scheduledDayCount,
-        submissionCount: prepWeekWithData.submissions.length,
+        submissionCount: prepWeekWithDataAndLock.submissions.length,
         sharedAcrossDays: usingSharedAllDays
       }
     });
@@ -557,9 +567,14 @@ export async function updateDayModeAction(prepWeekId: string, formData: FormData
 
 export async function togglePrepWeekEditLockAction(prepWeekId: string, formData: FormData) {
   const { user, membership, prepWeek } = await ensurePrepWeekAccess(prepWeekId);
+  const includeEditLock = await hasPrepWeekEditLockColumn();
 
   if (!canManagePrepWeekLock(user, membership)) {
     throw new Error("Only owners can change the edit lock for this prep week.");
+  }
+
+  if (!includeEditLock) {
+    throw new Error("Prep week edit locking is not available until the latest migration is applied.");
   }
 
   const isEditLocked = String(formData.get("isEditLocked") || "") === "true";

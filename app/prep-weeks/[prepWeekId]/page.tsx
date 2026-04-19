@@ -16,6 +16,7 @@ import {
   updateSubmissionAction
 } from "./actions";
 import { requireMembership } from "@/lib/auth";
+import { hasPrepWeekEditLockColumn, prepWeekScalarSelect, withPrepWeekEditLock } from "@/lib/prep-week-lock";
 import { prisma } from "@/lib/prisma";
 import {
   buildEligibleOptionsForSlot,
@@ -50,13 +51,15 @@ export default async function PrepWeekPage({
   const { prepWeekId } = await params;
   const { user, membership } = await requireMembership();
   const canEdit = membership.role === MembershipRole.OWNER || membership.role === MembershipRole.EDITOR;
+  const includeEditLock = await hasPrepWeekEditLockColumn();
 
   const prepWeek = await prisma.prepWeek.findFirst({
     where: {
       id: prepWeekId,
       workspaceId: membership.workspaceId
     },
-    include: {
+    select: {
+      ...prepWeekScalarSelect(includeEditLock),
       submissions: {
         include: {
           createdBy: true
@@ -76,21 +79,22 @@ export default async function PrepWeekPage({
       }
     }
   });
+  const prepWeekWithLock = withPrepWeekEditLock(prepWeek);
 
-  if (!prepWeek) {
+  if (!prepWeekWithLock) {
     notFound();
   }
 
   const canManageEditLock = membership.role === MembershipRole.OWNER;
-  const isEditLockedForCurrentUser = prepWeek.isEditLocked && !canManageEditLock;
+  const isEditLockedForCurrentUser = prepWeekWithLock.isEditLocked && !canManageEditLock;
   const canEditPrepWeek = canEdit && !isEditLockedForCurrentUser;
-  const allowSharedSchedule = prepWeek.submissions.length < 48;
+  const allowSharedSchedule = prepWeekWithLock.submissions.length < 48;
 
   return (
     <AppFrame user={user} membership={membership}>
       <section className="page-header">
         <p className="eyebrow">Prep Week</p>
-        <h1>{prepWeek.name}</h1>
+        <h1>{prepWeekWithLock.name}</h1>
         <p className="muted">
           Shared database-backed player submissions. {canEdit ? "You can edit this roster." : "You have read-only access."}
         </p>
@@ -98,16 +102,21 @@ export default async function PrepWeekPage({
           <Link href="/dashboard" className="button-secondary">
             Back to Dashboard
           </Link>
-          {prepWeek.startsOn ? <span className="pill">Starts: {prepWeek.startsOn.toISOString().slice(0, 10)}</span> : null}
-          {prepWeek.isEditLocked ? <span className="pill">Editing locked</span> : null}
+          {prepWeekWithLock.startsOn ? <span className="pill">Starts: {prepWeekWithLock.startsOn.toISOString().slice(0, 10)}</span> : null}
+          {prepWeekWithLock.isEditLocked ? <span className="pill">Editing locked</span> : null}
         </div>
-        {canManageEditLock ? (
-          <form action={togglePrepWeekEditLockAction.bind(null, prepWeek.id)} className="inline-actions" style={{ marginTop: 12 }}>
-            <input type="hidden" name="isEditLocked" value={String(!prepWeek.isEditLocked)} />
+        {canManageEditLock && includeEditLock ? (
+          <form action={togglePrepWeekEditLockAction.bind(null, prepWeekWithLock.id)} className="inline-actions" style={{ marginTop: 12 }}>
+            <input type="hidden" name="isEditLocked" value={String(!prepWeekWithLock.isEditLocked)} />
             <button className="button-secondary" type="submit">
-              {prepWeek.isEditLocked ? "Unlock Editing" : "Lock Editing"}
+              {prepWeekWithLock.isEditLocked ? "Unlock Editing" : "Lock Editing"}
             </button>
           </form>
+        ) : null}
+        {canManageEditLock && !includeEditLock ? (
+          <p className="muted" style={{ marginTop: 12 }}>
+            Edit locking will appear after the latest database migration is applied.
+          </p>
         ) : null}
         {isEditLockedForCurrentUser ? (
           <p className="muted" style={{ marginTop: 12 }}>
@@ -126,7 +135,7 @@ export default async function PrepWeekPage({
                 <strong>Add player</strong>
                 <div className="muted" style={{ marginTop: 4, marginBottom: 16 }}>Create one submission manually.</div>
 
-                <form action={createSubmissionAction.bind(null, prepWeek.id)} className="form-grid two-col">
+                <form action={createSubmissionAction.bind(null, prepWeekWithLock.id)} className="form-grid two-col">
                   <label style={{ gridColumn: "1 / -1" }}>
                     Player / alliance
                     <div className="split-input">
@@ -203,7 +212,7 @@ export default async function PrepWeekPage({
                   <br />
                   <code>[HEL]Kilo,13,12,13,22,00:00,01:00,optional notes</code>
                 </p>
-                <form action={bulkCreateSubmissionsAction.bind(null, prepWeek.id)} className="form-grid">
+                <form action={bulkCreateSubmissionsAction.bind(null, prepWeekWithLock.id)} className="form-grid">
                   <label>
                     Bulk player lines
                     <textarea
@@ -226,7 +235,7 @@ export default async function PrepWeekPage({
               <p className="eyebrow">Prep Days</p>
               <h2>Priority rules</h2>
               <div className="stack">
-                {prepWeek.days.map((day) => (
+                {prepWeekWithLock.days.map((day) => (
                   <details className="day-rule-card" key={day.id}>
                     <summary className="space-between" style={{ cursor: "pointer", listStyle: "none" }}>
                       <div>
@@ -235,7 +244,7 @@ export default async function PrepWeekPage({
                       </div>
                       <span className="button-secondary">Edit</span>
                     </summary>
-                    <form action={updateDayModeAction.bind(null, prepWeek.id)} style={{ marginTop: 14 }}>
+                    <form action={updateDayModeAction.bind(null, prepWeekWithLock.id)} style={{ marginTop: 14 }}>
                       <input type="hidden" name="prepDayId" value={day.id} />
                       <label>
                         Day mode
@@ -267,7 +276,7 @@ export default async function PrepWeekPage({
         <section className="card">
           <h2>Prep day rules</h2>
           <div className="inline-actions">
-            {prepWeek.days.map((day) => (
+            {prepWeekWithLock.days.map((day) => (
               <span className="pill" key={day.id}>
                 Day {day.dayNumber}: {getDayModeLabel(day.mode)}
               </span>
@@ -280,10 +289,10 @@ export default async function PrepWeekPage({
         <summary className="space-between" style={{ cursor: "pointer", listStyle: "none" }}>
           <div>
             <h2 style={{ marginBottom: 4 }}>Player submissions</h2>
-            <p className="muted">{prepWeek.submissions.length} saved player{submissionsPlural(prepWeek.submissions.length)}</p>
+            <p className="muted">{prepWeekWithLock.submissions.length} saved player{submissionsPlural(prepWeekWithLock.submissions.length)}</p>
           </div>
           <div className="inline-actions">
-            <Link href={`/prep-weeks/${prepWeek.id}/submissions.csv`} className="button-secondary">
+            <Link href={`/prep-weeks/${prepWeekWithLock.id}/submissions.csv`} className="button-secondary">
               Export CSV
             </Link>
             <span className="button-secondary">View</span>
@@ -306,7 +315,7 @@ export default async function PrepWeekPage({
               </tr>
             </thead>
             <tbody>
-              {prepWeek.submissions.map((submission) => (
+              {prepWeekWithLock.submissions.map((submission) => (
                 canEditPrepWeek ? (
                   <tr key={submission.id}>
                     <td>
@@ -332,7 +341,7 @@ export default async function PrepWeekPage({
                               Edit
                             </summary>
                             <div style={{ minWidth: 320, marginTop: 12 }}>
-                              <form id={formId} action={updateSubmissionAction.bind(null, prepWeek.id, submission.id)} className="form-grid">
+                              <form id={formId} action={updateSubmissionAction.bind(null, prepWeekWithLock.id, submission.id)} className="form-grid">
                                 <label>
                                   Player / alliance
                                   <div className="split-input">
@@ -405,7 +414,7 @@ export default async function PrepWeekPage({
                                   </button>
                                 </div>
                               </form>
-                              <form action={deleteSubmissionAction.bind(null, prepWeek.id, submission.id)} style={{ marginTop: 10 }}>
+                              <form action={deleteSubmissionAction.bind(null, prepWeekWithLock.id, submission.id)} style={{ marginTop: 10 }}>
                                 <button className="button-danger" type="submit">
                                   Delete
                                 </button>
@@ -434,7 +443,7 @@ export default async function PrepWeekPage({
                   </tr>
                 )
               ))}
-              {!prepWeek.submissions.length ? (
+              {!prepWeekWithLock.submissions.length ? (
                 <tr>
                   <td colSpan={canEditPrepWeek ? 8 : 7} className="muted">
                     No submissions saved yet.
@@ -455,7 +464,7 @@ export default async function PrepWeekPage({
             </p>
           </div>
           {canEditPrepWeek ? (
-            <form action={generateScheduleAction.bind(null, prepWeek.id)}>
+            <form action={generateScheduleAction.bind(null, prepWeekWithLock.id)}>
               <label className="muted" style={{ display: "block", marginBottom: 10 }}>
                 <input
                   type="checkbox"
@@ -484,8 +493,8 @@ export default async function PrepWeekPage({
         </div>
 
         <div className="stack">
-          {prepWeek.days.map((day) => {
-            const computed = computeDaySchedule(day, prepWeek.submissions);
+          {prepWeekWithLock.days.map((day) => {
+            const computed = computeDaySchedule(day, prepWeekWithLock.submissions);
             const speedupKey = getModeSpeedupKey(day.mode);
             const hasStoredSchedule = day.slots.length > 0;
             const renderedSlots = computed.autoApprove
@@ -504,7 +513,7 @@ export default async function PrepWeekPage({
                     manual: false
                   })),
                   day.slots,
-                  prepWeek.submissions,
+                  prepWeekWithLock.submissions,
                   day.mode
                 );
             const assignedIds = new Set(
@@ -516,10 +525,10 @@ export default async function PrepWeekPage({
                 .map((slot) => [slot.submission!.id, slot.label] as const)
             );
             const overflow = computed.autoApprove
-              ? prepWeek.submissions
+              ? prepWeekWithLock.submissions
                   .filter((submission) => !assignedIds.has(submission.id))
                   .sort((left, right) => left.playerName.localeCompare(right.playerName))
-              : buildOverflowForDay(day.mode, prepWeek.submissions, assignedIds);
+              : buildOverflowForDay(day.mode, prepWeekWithLock.submissions, assignedIds);
 
             return (
               <section className="card schedule-card" key={day.id}>
@@ -552,7 +561,7 @@ export default async function PrepWeekPage({
                         <tbody>
                           {renderedSlots.map((slot) => {
                             const eligibleOptions = buildEligibleOptionsForSlot(
-                              prepWeek.submissions,
+                              prepWeekWithLock.submissions,
                               renderedSlots.map((item) => ({
                                 slotIndex: item.slotIndex,
                                 submission: item.submission
@@ -587,7 +596,7 @@ export default async function PrepWeekPage({
                                         Edit
                                       </summary>
                                       <form
-                                        action={updateSlotAssignmentAction.bind(null, prepWeek.id)}
+                                        action={updateSlotAssignmentAction.bind(null, prepWeekWithLock.id)}
                                         className="inline-actions"
                                         style={{ marginTop: 12 }}
                                       >

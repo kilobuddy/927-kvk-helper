@@ -6,13 +6,16 @@ import { MembershipRole } from "@prisma/client";
 import { formatAuditTimestamp } from "@/lib/audit";
 import { createPrepWeekAction, deletePrepWeekAction, openLatestPrepWeekAction } from "./actions";
 import { requireMembership } from "@/lib/auth";
+import { hasPrepWeekEditLockColumn, prepWeekScalarSelect } from "@/lib/prep-week-lock";
 import { prisma } from "@/lib/prisma";
 
 export default async function DashboardPage() {
   const { user, membership } = await requireMembership();
+  const includeEditLock = await hasPrepWeekEditLockColumn();
   const prepWeeks = await prisma.prepWeek.findMany({
     where: { workspaceId: membership.workspaceId },
-    include: {
+    select: {
+      ...prepWeekScalarSelect(includeEditLock),
       _count: {
         select: {
           submissions: true
