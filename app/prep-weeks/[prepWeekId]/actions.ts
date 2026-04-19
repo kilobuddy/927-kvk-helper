@@ -85,6 +85,8 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
       : null;
   const sharedSchedule = templateDay ? computeDaySchedule(templateDay, prepWeek.submissions) : null;
   const usingSharedAllDays = shouldShareAllDays && sharedSchedule?.autoApprove === false;
+  const daySchedules = new Map(prepWeek.days.map((day) => [day.id, computeDaySchedule(day, prepWeek.submissions)]));
+  const scheduledDayCount = prepWeek.days.filter((day) => (daySchedules.get(day.id) || computeDaySchedule(day, prepWeek.submissions)).autoApprove === false).length;
 
   const dayIds = prepWeek.days.map((day) => day.id);
 
@@ -100,9 +102,8 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
     const rows: Omit<AssignmentSlot, "id" | "updatedAt">[] = [];
 
     prepWeek.days.forEach((day) => {
-      const computed = usingSharedAllDays
-        ? sharedSchedule
-        : computeDaySchedule(day, prepWeek.submissions);
+      const baseSchedule = daySchedules.get(day.id) || computeDaySchedule(day, prepWeek.submissions);
+      const computed = usingSharedAllDays && baseSchedule.autoApprove === false ? sharedSchedule : baseSchedule;
 
       if (computed.autoApprove) {
         return;
@@ -135,9 +136,7 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
       entityId: prepWeek.id,
       summary: `Generated schedules for ${prepWeek.name}.`,
       details: {
-        scheduledDays: usingSharedAllDays
-          ? prepWeek.days.length
-          : prepWeek.days.filter((day) => computeDaySchedule(day, prepWeek.submissions).autoApprove === false).length,
+        scheduledDays: scheduledDayCount,
         submissionCount: prepWeek.submissions.length,
         sharedAcrossDays: usingSharedAllDays
       }
