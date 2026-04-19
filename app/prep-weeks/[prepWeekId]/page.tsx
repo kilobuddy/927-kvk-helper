@@ -199,9 +199,6 @@ export default async function PrepWeekPage({
                     <button className="button-secondary" type="submit">
                       Import Lines
                     </button>
-                    <Link href={`/prep-weeks/${prepWeek.id}/submissions.csv`} className="button-secondary">
-                      Export CSV
-                    </Link>
                   </div>
                 </form>
               </section>
@@ -237,21 +234,6 @@ export default async function PrepWeekPage({
                   </details>
                 ))}
               </div>
-              <form action={generateScheduleAction.bind(null, prepWeek.id)} style={{ marginTop: 18 }}>
-                <label className="muted" style={{ display: "block", marginBottom: 12 }}>
-                  <input
-                    type="checkbox"
-                    name="useSameScheduleAllDays"
-                    value="true"
-                    disabled={!allowSharedSchedule}
-                    style={{ marginRight: 8 }}
-                  />
-                  Use the same slot assignments on all 3 days when fewer than 48 players applied.
-                </label>
-                <button className="button" type="submit">
-                  Generate Schedule
-                </button>
-              </form>
               <p className="muted helper-copy" style={{ marginTop: 16 }}>
                 Each player can hold at most one slot per day. If nobody is available for a slot, it stays open.
               </p>
@@ -461,10 +443,20 @@ export default async function PrepWeekPage({
                   type="checkbox"
                   name="useSameScheduleAllDays"
                   value="true"
+                  defaultChecked={allowSharedSchedule}
                   disabled={!allowSharedSchedule}
                   style={{ marginRight: 8 }}
                 />
                 Use the same slot assignments on all 3 days.
+              </label>
+              <label className="muted" style={{ display: "block", marginBottom: 10 }}>
+                <input
+                  type="checkbox"
+                  name="exportScheduleCsv"
+                  value="true"
+                  style={{ marginRight: 8 }}
+                />
+                Export generated schedule to CSV.
               </label>
               <button className="button" type="submit">
                 Generate Schedule

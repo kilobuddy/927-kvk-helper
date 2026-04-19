@@ -59,6 +59,7 @@ async function ensurePrepWeekAccess(prepWeekId: string) {
 export async function generateScheduleAction(prepWeekId: string, formData: FormData) {
   const { user, membership } = await ensureCanEdit();
   const useSameScheduleAllDays = String(formData.get("useSameScheduleAllDays") || "") === "true";
+  const exportScheduleCsv = String(formData.get("exportScheduleCsv") || "") === "true";
 
   const prepWeek = await prisma.prepWeek.findFirst({
     where: {
@@ -144,6 +145,10 @@ export async function generateScheduleAction(prepWeekId: string, formData: FormD
   });
 
   revalidatePath(`/prep-weeks/${prepWeekId}`);
+
+  if (exportScheduleCsv) {
+    redirect(`/prep-weeks/${prepWeekId}/schedule.csv`);
+  }
 }
 
 export async function updateSlotAssignmentAction(prepWeekId: string, formData: FormData) {
